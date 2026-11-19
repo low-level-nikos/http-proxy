@@ -1,0 +1,15 @@
+[package]
+name = "http_proxy"
+version = "0.1.0"
+edition = "2024"
+description = "A very simple http-proxy implementation."
+license = "MIT"
+repository = "https://github.com/low-level-nikos/http-proxy"
+readme = "README.md"
+keywords = ["http", "proxy", "networking"]
+categories = ["network-programming"]
+
+[dependencies]
+tokio = { version = "1.54.1", features = ["full"] }
+thiserror = "2.0.21"
+http = "1.0"

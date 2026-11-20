@@ -13,3 +13,4 @@ categories = ["network-programming"]
 tokio = { version = "1.54.1", features = ["full"] }
 thiserror = "2.0.21"
 http = "1.0"
+regex = "1.13.2"

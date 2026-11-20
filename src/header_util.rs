@@ -1,3 +1,6 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
 use tokio::io::AsyncReadExt;
 
 use crate::{
@@ -5,6 +8,26 @@ use crate::{
     consumable_buffer::{BufferRead, ConsumableBuffer},
     error::ProxyError,
 };
+
+static CONNECTION_REGEX: OnceLock<regex::Regex> = OnceLock::new();
+fn connection_regex() -> &'static regex::Regex {
+    CONNECTION_REGEX.get_or_init(|| Regex::new(r"^([A-Z]+) ([^\s]+:\d+) HTTP/1\.1").unwrap())
+}
+
+pub fn parse_header(header: &str) -> Result<&str, ProxyError> {
+    if let Some(capture) = connection_regex().captures(&header) {
+        let (_, [method, addr]) = capture.extract();
+        if "CONNECT" != method {
+            Err(ProxyError::WrongMethod("Method must be CONNECT"))
+        } else {
+            Ok(addr)
+        }
+    } else {
+        Err(ProxyError::HeaderFormatError(
+            "Bad request. Header does not match pattern.",
+        ))
+    }
+}
 
 // Reads the http header from the given reader into the given buffer.
 // The header part will be consumed from the buffer and returns as result.
@@ -137,5 +160,27 @@ mod tests {
             .expect_err("expected HeaderNotValidUtf8");
 
         assert!(matches!(err, ProxyError::HeaderNotValidUtf8(_)));
+    }
+
+    #[test]
+    fn test_connection_regex_matches_valid_connect() {
+        let re = connection_regex();
+        let line = "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n";
+        let caps = re.captures(line).expect("should match CONNECT request");
+        let (_, [method, target]) = caps.extract();
+
+        assert_eq!(method, "CONNECT");
+        assert_eq!(target, "example.com:443");
+    }
+
+    #[test]
+    fn test_connection_regex_rejects_missing_port_or_bad_version() {
+        let re = connection_regex();
+        assert!(re.captures("CONNECT example.com HTTP/1.1\r\n").is_none());
+        assert!(
+            re.captures("CONNECT example.com:443 HTTP/2.0\r\n")
+                .is_none()
+        );
+        assert!(re.captures("not a valid request line").is_none());
     }
 }

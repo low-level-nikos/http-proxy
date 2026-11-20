@@ -1,12 +1,17 @@
 use std::time::Duration;
 
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    select,
+};
+
 use crate::{
-    config::WRITE_TIMEOUT_SECS,
+    config::{READ_TIMEOUT_SECS, WRITE_TIMEOUT_SECS},
     consumable_buffer::{BufferRead, ConsumableBuffer},
     error::ProxyError,
 };
 
-pub async fn forward<const N: usize, F, T>(
+async fn forward<const N: usize, F, T>(
     reader: &mut F,
     read_buf: &mut ConsumableBuffer<N>,
     writer: &mut T,
@@ -47,6 +52,27 @@ where
         if reader_is_eof {
             break Ok(());
         }
+    }
+}
+
+// Redirects streams. Everything read by client is passed through to target and the other way round.
+// What makes this method special over tokio's bidirectional-copy is that it incorporates timeouts
+// to ensure standard safety mechanisms.
+pub async fn redirect_streams<const N: usize, R, W>(
+    client_reader: &mut R,
+    client_read_buf: &mut ConsumableBuffer<N>,
+    client_writer: &mut W,
+    target_reader: &mut R,
+    target_read_buf: &mut ConsumableBuffer<N>,
+    target_writer: &mut W,
+) -> Result<(), ProxyError>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    select! {
+      r = forward(client_reader, client_read_buf, target_writer, Duration::from_secs(READ_TIMEOUT_SECS)) => r,
+      r = forward(target_reader, target_read_buf, client_writer, Duration::from_secs(READ_TIMEOUT_SECS)) => r
     }
 }
 
@@ -150,7 +176,6 @@ mod tests {
             accepted_once: false,
         };
         let mut read_buf = ConsumableBuffer::<4>::new();
-
         let err = forward(
             &mut reader,
             &mut read_buf,
